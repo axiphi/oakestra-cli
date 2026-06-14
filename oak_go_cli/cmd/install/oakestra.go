@@ -6,14 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/oakestra/oak-go-cli/internal/cliout"
 	"github.com/oakestra/oak-go-cli/internal/download"
 	"github.com/oakestra/oak-go-cli/internal/iotools"
 )
 
-func installFirstParty(version string, autoConfirm bool) error {
+func installFirstParty(version string, autoConfirm bool) (bool, error) {
 	var (
 		arch     = runtime.GOARCH
 		source   = "remote"
@@ -24,11 +27,26 @@ func installFirstParty(version string, autoConfirm bool) error {
 
 	resolvedVersion, err := resolveOakestraVersion(version)
 	if err != nil {
-		return fmt.Errorf("failed to resolve Oakestra version: %w", err)
+		return false, fmt.Errorf("failed to resolve Oakestra version: %w", err)
 	}
 
 	if !autoConfirm {
-		err := huh.NewForm(
+		nodeFilePicker := huh.NewFilePicker().
+			Title("NodeEngine Archive Path").
+			Description("Select your NodeEngine.tar.gz file").
+			AllowedTypes([]string{".tar.gz", ".tgz", ".tar"}).
+			Validate(huh.ValidateNotEmpty()).
+			CurrentDirectory("/").
+			Value(&nodePath)
+		netFilePicker := huh.NewFilePicker().
+			Title("NetManager Archive Path").
+			Description("Select your NetManager.tar.gz file").
+			AllowedTypes([]string{".tar.gz", ".tgz", ".tar"}).
+			Validate(huh.ValidateNotEmpty()).
+			CurrentDirectory("/").
+			Value(&netPath)
+
+		form := huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
 					Title("Installation Source").
@@ -39,41 +57,123 @@ func installFirstParty(version string, autoConfirm bool) error {
 					Value(&source),
 			),
 			huh.NewGroup(
-				huh.NewInput().
-					Title("NodeEngine Archive Path").
-					Placeholder("/path/to/NodeEngine.tar.gz").
-					Value(&nodePath),
-				huh.NewInput().
-					Title("NetManager Archive Path").
-					Placeholder("/path/to/NetManager.tar.gz").
-					Value(&netPath),
+				nodeFilePicker,
+				netFilePicker,
 			).WithHideFunc(func() bool { return source != "local" }),
 			huh.NewGroup(
 				huh.NewConfirm().
 					Title("Proceed with installation?").
 					Value(&confirm),
 			),
-		).Run()
+		)
 
+		if currentDir, err := os.Getwd(); err == nil {
+			filePickerTraverseFromRootToTargetDir(nodeFilePicker, currentDir, false)
+			filePickerTraverseFromRootToTargetDir(netFilePicker, currentDir, false)
+		}
+
+		err := form.Run()
 		if err != nil {
-			return fmt.Errorf("configuration aborted: %w", err)
+			return false, fmt.Errorf("configuration aborted: %w", err)
 		}
 		if !confirm {
-			cliout.Infof("Aborted worker installation.")
-			return nil
+			return false, nil
 		}
 	}
 
 	if err := setupDirectories(); err != nil {
-		return err
+		return false, err
 	}
 
 	cliout.Infof("Installing Oakestra Worker Node...")
 	if source == "remote" {
-		return installFromRemote(resolvedVersion, arch)
+		return true, installFromRemote(resolvedVersion, arch)
 	} else {
-		return installFromLocal(nodePath, netPath)
+		return true, installFromLocal(nodePath, netPath)
 	}
+}
+
+func filePickerTraverseFromRootToTargetDir(filePicker *huh.FilePicker, targetDir string, showHidden bool) {
+	filePicker.Picking(true)
+
+	cleanPath := filepath.Clean(targetDir)
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+
+	currentPath := string(filepath.Separator)
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		entries, err := filePickerReadDir(currentPath, showHidden)
+		if err != nil {
+			// If we hit a permission error or the dir doesn't exist, halt traversal
+			return
+		}
+
+		// Find the index of the target folder within the current directory
+		targetIndex := -1
+		for i, entry := range entries {
+			if entry.Name() == part {
+				targetIndex = i
+				break
+			}
+		}
+
+		// If the directory isn't found in the list, we can't traverse further
+		if targetIndex == -1 {
+			return
+		}
+
+		// Send 'Down' commands to move the cursor to the target index.
+		// Note: Every time a directory is opened, huh's filepicker resets its cursor to index 0.
+		for i := 0; i < targetIndex; i++ {
+			filePicker.Update(tea.KeyMsg{
+				Type: tea.KeyDown,
+				Alt:  false,
+			})
+		}
+
+		// Send the 'Open' command to enter the directory
+		_, msg := filePicker.Update(tea.KeyMsg{
+			Type: tea.KeyRight,
+			Alt:  false,
+		})
+		filePicker.Update(interface{}(msg).(tea.Cmd)())
+
+		// Update the current path for the next depth iteration
+		currentPath = filepath.Join(currentPath, part)
+	}
+
+	filePicker.Picking(false)
+}
+
+func filePickerReadDir(path string, showHidden bool) ([]os.DirEntry, error) {
+	dirEntries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(dirEntries, func(i, j int) bool {
+		if dirEntries[i].IsDir() == dirEntries[j].IsDir() {
+			return dirEntries[i].Name() < dirEntries[j].Name()
+		}
+		return dirEntries[i].IsDir()
+	})
+
+	if showHidden {
+		return dirEntries, nil
+	}
+
+	var sanitizedDirEntries []os.DirEntry
+	for _, dirEntry := range dirEntries {
+		isHidden := strings.HasPrefix(dirEntry.Name(), ".")
+		if isHidden {
+			continue
+		}
+		sanitizedDirEntries = append(sanitizedDirEntries, dirEntry)
+	}
+	return sanitizedDirEntries, nil
 }
 
 func resolveOakestraVersion(version string) (string, error) {

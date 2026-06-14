@@ -22,16 +22,21 @@ func DoInstallWorker(version string, autoConfirm bool) error {
 		return err
 	}
 	if !containerdReady {
-		cliout.Warnf("Containerd is not installed, disabling the containerd runtime of the Oakestra worker.\n" +
-			"Make sure to install containerd on this machine yourself if you want to use it.")
+		cliout.Warnf("Containerd is not installed or enabled, disabling the containerd runtime of the Oakestra worker.")
+		cliout.Warnf("Make sure to install and enable containerd on this machine yourself if you want to use it.")
 	}
 
 	if err := installNvidiaCTK(osFamily, autoConfirm); err != nil {
 		return err
 	}
 
-	if err := installFirstParty(version, autoConfirm); err != nil {
+	workerReady, err := installFirstParty(version, autoConfirm)
+	if err != nil {
 		return err
+	}
+	if !workerReady {
+		cliout.Warnf("Oakestra worker was not installed.")
+		return nil
 	}
 
 	if err := configureWorker(); err != nil {
