@@ -2,17 +2,14 @@ package cmd
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/oakestra/oak-go-cli/cmd/install"
 	"github.com/spf13/cobra"
 
 	"github.com/oakestra/oak-go-cli/internal/api"
@@ -194,173 +191,8 @@ After installation the CLI will let you pick which cluster this
 worker should join and will configure NodeEngine automatically.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return doInstallWorker(firstArg(args), installWorkerYes, installSudo)
+		return install.DoInstallWorker(firstArg(args), installWorkerYes)
 	},
-}
-
-func doInstallWorker(version string, yes, sudo bool) error {
-	// Step 0: best-effort cluster presence check.
-	client, clientErr := api.New()
-	if clientErr == nil {
-		clusters, err := client.GetClusters(false)
-		if err != nil || len(clusters) == 0 {
-			fmt.Println(yellow("Warning: no active clusters found. Make sure a cluster orchestrator is registered with the root orchestrator before proceeding."))
-		}
-	} else {
-		fmt.Println(dim("(Cluster pre-check skipped — root orchestrator address not configured)"))
-	}
-
-	// Step 1: Check prerequisites.
-	if err := checkFundamentals(); err != nil {
-		return err
-	}
-
-	// Step 2: Confirm.
-	if !confirmInstall("NodeEngine worker node", yes) {
-		fmt.Println("Aborted.")
-		return nil
-	}
-
-	// Step 3: Export version.
-	setVersion(version)
-
-	// Step 4: Run install script.
-	fmt.Println("Installing NodeEngine worker node…")
-	if err := shellRun(sudo, "curl -sfL oakestra.io/install-worker.sh | sh -"); err != nil {
-		return fmt.Errorf("worker installation failed: %w", err)
-	}
-
-	// Step 5: Cluster selection and NodeEngine config.
-	if clientErr == nil {
-		if err := configureWorkerCluster(client); err != nil {
-			fmt.Fprintf(os.Stderr, "%s could not configure cluster automatically: %v\n", yellow("Warning:"), err)
-			fmt.Println("Run manually: " + bold("sudo NodeEngine config cluster <IP>"))
-		}
-	}
-
-	// Step 6: Optionally start the worker now.
-	fmt.Println()
-	if confirmPromptYN("Start the worker node now?", yes) {
-		fmt.Println("Starting NodeEngine…")
-		if err := runInteractive("sudo", "NodeEngine", "-d"); err != nil {
-			fmt.Fprintf(os.Stderr, "%s failed to start NodeEngine: %v\n", yellow("Warning:"), err)
-		}
-	}
-
-	// Step 7: Completion hint.
-	fmt.Printf("\n%s  Use %s to manage the worker node.\n",
-		green("✓ Worker node installed."), bold("oak worker"))
-	return nil
-}
-
-// clusterProbe holds the reachability result for a single cluster.
-type clusterProbe struct {
-	cluster     api.Cluster
-	reachable   bool
-	reachableIP string
-}
-
-// probeCluster GETs <ip>:10100/status with a 3 s timeout and returns true
-// only if the response parses and cluster_id matches the expected value.
-func probeCluster(cluster api.Cluster, ip string) bool {
-	type statusResp struct {
-		ClusterID string `json:"cluster_id"`
-	}
-	c := &http.Client{Timeout: 3 * time.Second}
-	resp, err := c.Get(fmt.Sprintf("http://%s:10100/api/cluster/status", ip))
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	var s statusResp
-	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return false
-	}
-	return s.ClusterID == cluster.ClusterID
-}
-
-// probeAllClusters probes every cluster in parallel.
-// For each one it tries CLUSTER_IP first, then ROOT_IP as a fallback.
-func probeAllClusters(clusters []api.Cluster, rootIP string) []clusterProbe {
-	results := make([]clusterProbe, len(clusters))
-	var wg sync.WaitGroup
-	wg.Add(len(clusters))
-	for i, c := range clusters {
-		go func() {
-			defer wg.Done()
-			pr := clusterProbe{cluster: c}
-			if probeCluster(c, c.ClusterIP) {
-				pr.reachable = true
-				pr.reachableIP = c.ClusterIP
-			} else if rootIP != "" && rootIP != c.ClusterIP && probeCluster(c, rootIP) {
-				pr.reachable = true
-				pr.reachableIP = rootIP
-			}
-			results[i] = pr
-		}()
-	}
-	wg.Wait()
-	return results
-}
-
-// configureWorkerCluster shows registered clusters with reachability status and runs
-// `sudo NodeEngine config cluster <IP>` for the selected one.
-func configureWorkerCluster(client *api.Client) error {
-	clusters, err := client.GetClusters(false)
-	if err != nil {
-		return err
-	}
-	if len(clusters) == 0 {
-		return fmt.Errorf("no active clusters available")
-	}
-
-	var rootIP string
-	if cfg, err := config.Load(); err == nil {
-		rootIP = cfg.SystemManagerIP
-	}
-
-	fmt.Println("\nProbing cluster reachability…")
-	probes := probeAllClusters(clusters, rootIP)
-
-	fmt.Println("\nAvailable clusters:")
-	for i, pr := range probes {
-		var statusLabel, ipDisplay string
-		if pr.reachable {
-			statusLabel = green("✓ reachable")
-			ipDisplay = green(pr.reachableIP)
-		} else {
-			statusLabel = red("✗ unreachable")
-			ipDisplay = dim(pr.cluster.ClusterIP)
-		}
-		fmt.Printf("  [%d] %s  %s  %s\n", i+1, colorName(pr.cluster.ClusterName), ipDisplay, statusLabel)
-	}
-
-	var selected *clusterProbe
-	if len(probes) == 1 {
-		selected = &probes[0]
-		ip := selected.cluster.ClusterIP
-		if selected.reachable {
-			ip = selected.reachableIP
-		}
-		fmt.Printf("Using the only available cluster: %s (%s)\n", colorName(selected.cluster.ClusterName), ip)
-	} else {
-		fmt.Print("\nSelect a cluster (number): ")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		n, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
-		if err != nil || n < 1 || n > len(probes) {
-			return fmt.Errorf("invalid selection")
-		}
-		selected = &probes[n-1]
-	}
-
-	ip := selected.cluster.ClusterIP
-	if selected.reachable {
-		ip = selected.reachableIP
-	}
-
-	fmt.Printf("Configuring NodeEngine → cluster %s…\n", green(ip))
-	return runInteractive("sudo", "NodeEngine", "config", "cluster", ip)
 }
 
 // ─── install full ─────────────────────────────────────────────────────────────
@@ -411,7 +243,7 @@ Requires Docker with Compose support.`,
 			return nil
 		}
 		// Worker start prompt still respects the yes flag.
-		if err := doInstallWorker(version, yes, installSudo); err != nil {
+		if err := install.DoInstallWorker(version, yes); err != nil {
 			return fmt.Errorf("worker install: %w", err)
 		}
 		return nil
@@ -426,18 +258,6 @@ func confirmInstall(component string, yes bool) bool {
 		return true
 	}
 	fmt.Printf("This will install the %s on this machine. Continue? [y/N] ", bold(component))
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	ans := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	return ans == "y" || ans == "yes"
-}
-
-// confirmPromptYN is a generic yes/no prompt.
-func confirmPromptYN(prompt string, yes bool) bool {
-	if yes {
-		return true
-	}
-	fmt.Printf("%s [y/N] ", prompt)
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	ans := strings.ToLower(strings.TrimSpace(scanner.Text()))
