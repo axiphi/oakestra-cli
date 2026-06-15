@@ -2,9 +2,11 @@ package iotools
 
 import (
 	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/afero"
 )
@@ -13,6 +15,33 @@ type ExtractTarTarget struct {
 	TarName string
 	DstPath string
 	DstPerm os.FileMode
+}
+
+func ExtractTarGzip(
+	tarGzipPath string,
+	targets ...ExtractTarTarget,
+) error {
+	return ExtractTarGzipInFs(afero.NewOsFs(), tarGzipPath, targets...)
+}
+
+func ExtractTarGzipInFs(
+	fs afero.Fs,
+	tarGzipPath string,
+	targets ...ExtractTarTarget,
+) error {
+	tarGzipFile, err := fs.Open(tarGzipPath)
+	if err != nil {
+		return fmt.Errorf("failed to open tar gzip file: %w", err)
+	}
+	defer CloseOrWarn(tarGzipFile, tarGzipPath)
+
+	gzipReader, err := gzip.NewReader(tarGzipFile)
+	if err != nil {
+		return fmt.Errorf("failed to read tar gzip file: %w", err)
+	}
+	defer CloseOrWarn(gzipReader, tarGzipPath)
+
+	return extractTarFromReader(fs, gzipReader, targets...)
 }
 
 // ExtractTar performs ExtractTarInFs in the OS filesystem.
@@ -37,7 +66,15 @@ func ExtractTarInFs(
 	}
 	defer CloseOrWarn(tarFile, tarPath)
 
-	tarReader := tar.NewReader(tarFile)
+	return extractTarFromReader(fs, tarFile, targets...)
+}
+
+func extractTarFromReader(
+	fs afero.Fs,
+	reader io.Reader,
+	targets ...ExtractTarTarget,
+) error {
+	tarReader := tar.NewReader(reader)
 
 	targetsByTarName := make(map[string]ExtractTarTarget, len(targets))
 	for _, target := range targets {
@@ -57,7 +94,11 @@ func ExtractTarInFs(
 			continue
 		}
 
-		target, exists := targetsByTarName[header.Name]
+		// Sometimes entries are "./filename.txt", other times "filename.txt" and so on.
+		// Normalizing the name here makes working with the archives a lot easier.
+		cleanName := filepath.Clean(header.Name)
+
+		target, exists := targetsByTarName[cleanName]
 		if !exists {
 			continue
 		}

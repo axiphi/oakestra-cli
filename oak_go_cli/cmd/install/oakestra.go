@@ -197,6 +197,9 @@ func setupDirectories() error {
 	if err := os.MkdirAll("/etc/netmanager", 0o755); err != nil {
 		return fmt.Errorf("failed to create NetManager config directory (/etc/netmanager): %w", err)
 	}
+	if err := os.MkdirAll("/etc/systemd/system", 0o755); err != nil {
+		return fmt.Errorf("failed to create systemd unit directory (/etc/systemd/system): %w", err)
+	}
 	return nil
 }
 
@@ -218,7 +221,7 @@ func installFromRemote(version string, arch string) error {
 
 	netArchiveURL := fmt.Sprintf("https://github.com/oakestra/oakestra-net/releases/download/%s/NetManager_%s.tar.gz", version, arch)
 	cliout.Infof("Downloading NetManager from %s...", netArchiveURL)
-	if err := download.GetHttpBodyToFile(netArchivePath, netArchiveURL); err != nil {
+	if err := download.GetHttpBodyToFile(netArchiveURL, netArchivePath); err != nil {
 		return fmt.Errorf("failed to download NetManager: %w", err)
 	}
 
@@ -245,21 +248,21 @@ func installFromLocal(nodeArchivePath string, netArchivePath string) error {
 }
 
 func installNodeArchive(nodeArchivePath string) error {
-	return iotools.ExtractTar(
+	return iotools.ExtractTarGzip(
 		nodeArchivePath,
 		iotools.ExtractTarTarget{
-			TarName: "./NodeEngine",
-			DstPath: "/usr/local/bin/NodeEngine",
+			TarName: "NodeEngine",
+			DstPath: "/bin/NodeEngine",
 			DstPerm: 0o755,
 		},
 		iotools.ExtractTarTarget{
-			TarName: "./nodeengined",
-			DstPath: "/usr/local/bin/nodeengined",
+			TarName: "nodeengined",
+			DstPath: "/bin/nodeengined",
 			DstPerm: 0o755,
 		},
 		iotools.ExtractTarTarget{
-			TarName: "./nodeengine.service",
-			DstPath: "/usr/local/lib/systemd/system/nodeengine.service",
+			TarName: "nodeengine.service",
+			DstPath: "/etc/systemd/system/nodeengine.service",
 			DstPerm: 0o644,
 		},
 	)
@@ -268,33 +271,33 @@ func installNodeArchive(nodeArchivePath string) error {
 func installNetArchive(netArchivePath string) error {
 	installTargets := []iotools.ExtractTarTarget{
 		{
-			TarName: "./NetManager",
-			DstPath: "/usr/local/bin/NetManager",
+			TarName: "NetManager",
+			DstPath: "/bin/NetManager",
 			DstPerm: 0o755,
 		},
 		{
-			TarName: "./netmanager.service",
-			DstPath: "/usr/local/lib/systemd/system/netmanager.service",
+			TarName: "netmanager.service",
+			DstPath: "/etc/systemd/system/netmanager.service",
 			DstPerm: 0o644,
 		},
 	}
 
 	if _, err := os.Stat("/etc/netmanager/tuncfg.json"); errors.Is(err, os.ErrNotExist) {
 		installTargets = append(installTargets, iotools.ExtractTarTarget{
-			TarName: "./tuncfg.json",
+			TarName: "tuncfg.json",
 			DstPath: "/etc/netmanager/tuncfg.json",
 			DstPerm: 0o644,
 		})
 	}
 	if _, err := os.Stat("/etc/netmanager/netcfg.json"); errors.Is(err, os.ErrNotExist) {
 		installTargets = append(installTargets, iotools.ExtractTarTarget{
-			TarName: "./netcfg.json",
+			TarName: "netcfg.json",
 			DstPath: "/etc/netmanager/netcfg.json",
 			DstPerm: 0o644,
 		})
 	}
 
-	return iotools.ExtractTar(
+	return iotools.ExtractTarGzip(
 		netArchivePath,
 		installTargets...,
 	)
