@@ -8,7 +8,7 @@ import (
 )
 
 func MoveFile(srcPath string, dstPath string) error {
-	return MoveFileInFs(afero.NewOsFs(), srcPath, srcPath)
+	return MoveFileInFs(afero.NewOsFs(), srcPath, dstPath)
 }
 
 func MoveFileInFs(fs afero.Fs, srcPath string, dstPath string) error {
@@ -38,7 +38,7 @@ func MoveFileInFs(fs afero.Fs, srcPath string, dstPath string) error {
 }
 
 func MoveDir(fs afero.Fs, srcPath string, dstPath string) error {
-	return MoveDirInFs(afero.NewOsFs(), srcPath, srcPath)
+	return MoveDirInFs(fs, srcPath, dstPath)
 }
 
 func MoveDirInFs(fs afero.Fs, srcPath string, dstPath string) error {

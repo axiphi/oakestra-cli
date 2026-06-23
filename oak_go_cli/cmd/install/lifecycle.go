@@ -24,7 +24,7 @@ func startSystemdUnits() error {
 		return fmt.Errorf("failed to start nodeengine systemd service: %w", err)
 	}
 	if err := cmd.RunSilent("systemctl", "start", "netmanager"); err != nil {
-		return fmt.Errorf("failed to start nodeengine systemd service: %w", err)
+		return fmt.Errorf("failed to start netmanager systemd service: %w", err)
 	}
 	return nil
 }
