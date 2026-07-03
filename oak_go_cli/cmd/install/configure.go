@@ -52,13 +52,17 @@ func configureWorkerCluster(clusters []api.Cluster) error {
 	}
 
 	cliout.Infof("Configuring NodeEngine cluster ip to %s...", cliout.Green(selectedClusterProbe.ip))
-	return cmd.RunSilent("sudo", "NodeEngine", "config", "cluster", selectedClusterProbe.ip)
+	return cmd.RunSilent("NodeEngine", "config", "cluster", selectedClusterProbe.ip)
 }
 
 func selectCluster(probes []clusterProbe) (*clusterProbe, error) {
 	if len(probes) == 1 {
 		probe := &probes[0]
-		cliout.Infof("Using the only configured cluster: %s (%s)", cliout.Cyan(probe.name), probe.ip)
+		if probe.reachability == clusterReachabilityUnreachable {
+			cliout.Warnf("Using the only configured cluster: %s (%s) which is currently unreachable", cliout.Cyan(probe.name), probe.ip)
+		} else {
+			cliout.Infof("Using the only configured cluster: %s (%s)", cliout.Cyan(probe.name), probe.ip)
+		}
 		return probe, nil
 	}
 
