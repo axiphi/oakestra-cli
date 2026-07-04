@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 
 	"github.com/oakestra/oak-go-cli/internal/cliout"
 	"github.com/oakestra/oak-go-cli/internal/cmd"
@@ -27,7 +28,7 @@ func installContainerd(_ OSFamily, autoConfirm bool) (bool, error) {
 		return true, nil
 	}
 
-	if err := cmd.RunSilent("systemctl", "list-unit-files", "containerd.service"); err == nil {
+	if checkIsContainerdInstalled() {
 		plan := &enact.Plan{
 			Info:  "Existing containerd installation is not running",
 			Goal:  "start and enable it",
@@ -48,6 +49,18 @@ func installContainerd(_ OSFamily, autoConfirm bool) (bool, error) {
 		Steps: getCustomContainerdInstallSteps(tempDir),
 	}
 	return plan.Execute(autoConfirm)
+}
+
+func checkIsContainerdInstalled() bool {
+	output, err := cmd.RunCaptured("systemctl", "list-unit-files", "containerd.service")
+
+	// on some versions, systemd errors for non-existent units
+	if err != nil {
+		return false
+	}
+
+	// on others, it succeeds but prints "0 unit files listed"
+	return !strings.Contains(string(output), "0 unit files listed.")
 }
 
 func getContainerdEnableSteps() []enact.Step {

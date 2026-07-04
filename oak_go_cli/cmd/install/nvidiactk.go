@@ -1,17 +1,24 @@
 package install
 
 import (
+	"io"
+	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/oakestra/oak-go-cli/internal/cliout"
 	"github.com/oakestra/oak-go-cli/internal/download"
 	"github.com/oakestra/oak-go-cli/internal/enact"
+	"github.com/oakestra/oak-go-cli/internal/iotools"
 )
 
 func installNvidiaCTK(osFamily OSFamily, autoConfirm bool) error {
+	// nvidia-smi for standard GPUs, tegrastats for Jetson GPUs
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
-		cliout.Infof("No NVIDIA GPU detected, skipping NVIDIA Container Toolkit installation.")
-		return nil
+		if _, err := exec.LookPath("tegrastats"); err != nil {
+			cliout.Infof("No NVIDIA GPU detected, skipping NVIDIA Container Toolkit installation.")
+			return nil
+		}
 	}
 
 	if _, err := exec.LookPath("nvidia-ctk"); err == nil {
@@ -98,6 +105,46 @@ func getNvidiaCTKInstallCommands(osFamily OSFamily) []enact.Step {
 			enact.CommandStep{
 				Command: "gpg",
 				Args:    []string{"--dearmor", "-o", "/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg", "/tmp/nvidia.pub"},
+			},
+			enact.FuncStep{
+				Name: "Configure NVIDIA APT Repository List",
+				Fn: func() error {
+					err := download.GetHttpBodyToFile(
+						"https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list",
+						"/etc/apt/sources.list.d/nvidia-container-toolkit.list",
+						0o644,
+					)
+					if err != nil {
+						return err
+					}
+
+					file, err := os.OpenFile("/etc/apt/sources.list.d/nvidia-container-toolkit.list", os.O_RDWR, 0o644)
+					if err != nil {
+						return err
+					}
+					defer iotools.CloseOrWarn(file, "/etc/apt/sources.list.d/nvidia-container-toolkit.list")
+
+					content, err := io.ReadAll(file)
+					if err != nil {
+						return err
+					}
+
+					modifiedContent := strings.ReplaceAll(
+						string(content),
+						"deb https://",
+						"deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://",
+					)
+
+					if err := file.Truncate(0); err != nil {
+						return err
+					}
+					if _, err := file.Seek(0, io.SeekStart); err != nil {
+						return err
+					}
+
+					_, err = io.Copy(file, strings.NewReader(modifiedContent))
+					return err
+				},
 			},
 			enact.CommandStep{
 				Command: "apt-get",
