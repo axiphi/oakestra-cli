@@ -39,7 +39,7 @@ func checkHTTPStatus(resp *http.Response, url string) error {
 	return nil
 }
 
-func GetHttpBodyToFile(url string, dstPath string) error {
+func GetHttpBodyToFile(url string, dstPath string, dstPerm os.FileMode) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
@@ -50,7 +50,7 @@ func GetHttpBodyToFile(url string, dstPath string) error {
 		return err
 	}
 
-	outFile, err := os.Create(dstPath)
+	outFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, dstPerm)
 	if err != nil {
 		return err
 	}

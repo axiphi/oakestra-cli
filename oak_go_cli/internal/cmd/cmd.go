@@ -26,3 +26,8 @@ func RunSilent(command string, args ...string) error {
 	cmd.Stderr = nil
 	return cmd.Run()
 }
+
+func RunCaptured(command string, args ...string) ([]byte, error) {
+	cmd := exec.Command(command, args...)
+	return cmd.Output()
+}

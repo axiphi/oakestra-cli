@@ -92,7 +92,7 @@ func getNvidiaCTKInstallCommands(osFamily OSFamily) []enact.Step {
 			enact.FuncStep{
 				Name: "Download NVIDIA GPG Key",
 				Fn: func() error {
-					return download.GetHttpBodyToFile("https://nvidia.github.io/libnvidia-container/gpgkey", "/tmp/nvidia.pub")
+					return download.GetHttpBodyToFile("https://nvidia.github.io/libnvidia-container/gpgkey", "/tmp/nvidia.pub", 0o644)
 				},
 			},
 			enact.CommandStep{
@@ -121,7 +121,11 @@ func getNvidiaCTKInstallCommands(osFamily OSFamily) []enact.Step {
 			enact.FuncStep{
 				Name: "Download NVIDIA Toolkit Repository",
 				Fn: func() error {
-					return download.GetHttpBodyToFile("https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo", "/etc/yum.repos.d/nvidia-container-toolkit.repo")
+					return download.GetHttpBodyToFile(
+						"https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo",
+						"/etc/yum.repos.d/nvidia-container-toolkit.repo",
+						0o644,
+					)
 				},
 			},
 			enact.CommandStep{

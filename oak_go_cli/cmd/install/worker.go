@@ -54,7 +54,7 @@ func DoInstallWorker(version string, autoConfirm bool) error {
 
 func startWorker(autoConfirm bool) error {
 	if !autoConfirm {
-		var confirmed bool
+		var confirmed = true
 		err := huh.NewConfirm().
 			Title(fmt.Sprintf("Start the worker node now?")).
 			Value(&confirmed).

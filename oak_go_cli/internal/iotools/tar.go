@@ -7,19 +7,53 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/spf13/afero"
 )
 
-type ExtractTarTarget struct {
+type TarDestination struct {
+	DstPath string
+	DstPerm os.FileMode
+}
+
+type TarTarget interface {
+	Match(cleanName string) *TarDestination
+}
+
+type ExactTarTarget struct {
 	TarName string
 	DstPath string
 	DstPerm os.FileMode
 }
 
+func (e ExactTarTarget) Match(cleanName string) *TarDestination {
+	if e.TarName == cleanName {
+		return &TarDestination{DstPath: e.DstPath, DstPerm: e.DstPerm}
+	}
+	return nil
+}
+
+type RegexpTarTarget struct {
+	TarNameRegex    *regexp.Regexp
+	DstPathTemplate string
+	DstPerm         os.FileMode
+}
+
+func (r RegexpTarTarget) Match(cleanName string) *TarDestination {
+	if r.TarNameRegex == nil {
+		return nil
+	}
+	if r.TarNameRegex.MatchString(cleanName) {
+		dstPath := r.TarNameRegex.ReplaceAllString(cleanName, r.DstPathTemplate)
+		return &TarDestination{DstPath: dstPath, DstPerm: r.DstPerm}
+	}
+	return nil
+}
+
 func ExtractTarGzip(
 	tarGzipPath string,
-	targets ...ExtractTarTarget,
+	targets ...TarTarget,
 ) error {
 	return ExtractTarGzipInFs(afero.NewOsFs(), tarGzipPath, targets...)
 }
@@ -27,7 +61,7 @@ func ExtractTarGzip(
 func ExtractTarGzipInFs(
 	fs afero.Fs,
 	tarGzipPath string,
-	targets ...ExtractTarTarget,
+	targets ...TarTarget,
 ) error {
 	tarGzipFile, err := fs.Open(tarGzipPath)
 	if err != nil {
@@ -47,18 +81,16 @@ func ExtractTarGzipInFs(
 // ExtractTar performs ExtractTarInFs in the OS filesystem.
 func ExtractTar(
 	tarPath string,
-	targets ...ExtractTarTarget,
+	targets ...TarTarget,
 ) error {
 	return ExtractTarInFs(afero.NewOsFs(), tarPath, targets...)
 }
 
-// ExtractTarInFs extracts specific files from a tar archive as specified in pathMapping.
-// The target directory baseDstDir must not exist when this function is called.
-// If no files in the tar matched any entry in pathMapping, targetDir is not created.
+// ExtractTarInFs extracts specific files from a tar archive based on the provided targets.
 func ExtractTarInFs(
 	fs afero.Fs,
 	tarPath string,
-	targets ...ExtractTarTarget,
+	targets ...TarTarget,
 ) error {
 	tarFile, err := fs.Open(tarPath)
 	if err != nil {
@@ -72,14 +104,9 @@ func ExtractTarInFs(
 func extractTarFromReader(
 	fs afero.Fs,
 	reader io.Reader,
-	targets ...ExtractTarTarget,
+	targets ...TarTarget,
 ) error {
 	tarReader := tar.NewReader(reader)
-
-	targetsByTarName := make(map[string]ExtractTarTarget, len(targets))
-	for _, target := range targets {
-		targetsByTarName[target.TarName] = target
-	}
 
 	for {
 		header, err := tarReader.Next()
@@ -98,16 +125,25 @@ func extractTarFromReader(
 		// Normalizing the name here makes working with the archives a lot easier.
 		cleanName := filepath.Clean(header.Name)
 
-		target, exists := targetsByTarName[cleanName]
-		if !exists {
+		dst := findMatchingTarget(cleanName, targets)
+		if dst == nil {
 			continue
 		}
 
-		if err := extractTarFile(fs, tarReader, target.DstPath, target.DstPerm); err != nil {
+		if err := extractTarFile(fs, tarReader, dst.DstPath, dst.DstPerm); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func findMatchingTarget(cleanName string, targets []TarTarget) *TarDestination {
+	for _, target := range targets {
+		if dest := target.Match(cleanName); dest != nil {
+			return dest
+		}
+	}
 	return nil
 }
 

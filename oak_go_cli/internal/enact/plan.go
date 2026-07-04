@@ -24,7 +24,7 @@ func (p *Plan) Execute(autoConfirm bool) (bool, error) {
 	if autoConfirm {
 		cliout.Infof("%s, running these steps to %s:\n%s", p.Info, p.Goal, stepDescriptions)
 	} else {
-		var confirmed = false
+		var confirmed = true
 		err := huh.NewConfirm().
 			Title(fmt.Sprintf("%s,\nrun these steps to %s?\n%s", p.Info, p.Goal, stepDescriptions)).
 			Value(&confirmed).

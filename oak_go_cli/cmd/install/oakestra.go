@@ -22,7 +22,7 @@ func installFirstParty(version string, autoConfirm bool) (bool, error) {
 		source   = "remote"
 		nodePath string
 		netPath  string
-		confirm  bool
+		confirm  = true
 	)
 
 	resolvedVersion, err := resolveOakestraVersion(version)
@@ -34,14 +34,14 @@ func installFirstParty(version string, autoConfirm bool) (bool, error) {
 		nodeFilePicker := huh.NewFilePicker().
 			Title("NodeEngine Archive Path").
 			Description("Select your NodeEngine.tar.gz file").
-			AllowedTypes([]string{".tar.gz", ".tgz", ".tar"}).
+			AllowedTypes([]string{".tar.gz", ".tgz"}).
 			Validate(huh.ValidateNotEmpty()).
 			CurrentDirectory("/").
 			Value(&nodePath)
 		netFilePicker := huh.NewFilePicker().
 			Title("NetManager Archive Path").
 			Description("Select your NetManager.tar.gz file").
-			AllowedTypes([]string{".tar.gz", ".tgz", ".tar"}).
+			AllowedTypes([]string{".tar.gz", ".tgz"}).
 			Validate(huh.ValidateNotEmpty()).
 			CurrentDirectory("/").
 			Value(&netPath)
@@ -215,13 +215,13 @@ func installFromRemote(version string, arch string) error {
 
 	nodeArchiveURL := fmt.Sprintf("https://github.com/oakestra/oakestra/releases/download/%s/NodeEngine_%s.tar.gz", version, arch)
 	cliout.Infof("Downloading NodeEngine from %s...", nodeArchiveURL)
-	if err := download.GetHttpBodyToFile(nodeArchiveURL, nodeArchivePath); err != nil {
+	if err := download.GetHttpBodyToFile(nodeArchiveURL, nodeArchivePath, 0o644); err != nil {
 		return fmt.Errorf("failed to download NodeEngine: %w", err)
 	}
 
 	netArchiveURL := fmt.Sprintf("https://github.com/oakestra/oakestra-net/releases/download/%s/NetManager_%s.tar.gz", version, arch)
 	cliout.Infof("Downloading NetManager from %s...", netArchiveURL)
-	if err := download.GetHttpBodyToFile(netArchiveURL, netArchivePath); err != nil {
+	if err := download.GetHttpBodyToFile(netArchiveURL, netArchivePath, 0o644); err != nil {
 		return fmt.Errorf("failed to download NetManager: %w", err)
 	}
 
@@ -250,17 +250,17 @@ func installFromLocal(nodeArchivePath string, netArchivePath string) error {
 func installNodeArchive(nodeArchivePath string) error {
 	return iotools.ExtractTarGzip(
 		nodeArchivePath,
-		iotools.ExtractTarTarget{
+		iotools.ExactTarTarget{
 			TarName: "NodeEngine",
 			DstPath: "/bin/NodeEngine",
 			DstPerm: 0o755,
 		},
-		iotools.ExtractTarTarget{
+		iotools.ExactTarTarget{
 			TarName: "nodeengined",
 			DstPath: "/bin/nodeengined",
 			DstPerm: 0o755,
 		},
-		iotools.ExtractTarTarget{
+		iotools.ExactTarTarget{
 			TarName: "nodeengine.service",
 			DstPath: "/etc/systemd/system/nodeengine.service",
 			DstPerm: 0o644,
@@ -269,13 +269,13 @@ func installNodeArchive(nodeArchivePath string) error {
 }
 
 func installNetArchive(netArchivePath string) error {
-	installTargets := []iotools.ExtractTarTarget{
-		{
+	installTargets := []iotools.TarTarget{
+		iotools.ExactTarTarget{
 			TarName: "NetManager",
 			DstPath: "/bin/NetManager",
 			DstPerm: 0o755,
 		},
-		{
+		iotools.ExactTarTarget{
 			TarName: "netmanager.service",
 			DstPath: "/etc/systemd/system/netmanager.service",
 			DstPerm: 0o644,
@@ -283,14 +283,14 @@ func installNetArchive(netArchivePath string) error {
 	}
 
 	if _, err := os.Stat("/etc/netmanager/tuncfg.json"); errors.Is(err, os.ErrNotExist) {
-		installTargets = append(installTargets, iotools.ExtractTarTarget{
+		installTargets = append(installTargets, iotools.ExactTarTarget{
 			TarName: "tuncfg.json",
 			DstPath: "/etc/netmanager/tuncfg.json",
 			DstPerm: 0o644,
 		})
 	}
 	if _, err := os.Stat("/etc/netmanager/netcfg.json"); errors.Is(err, os.ErrNotExist) {
-		installTargets = append(installTargets, iotools.ExtractTarTarget{
+		installTargets = append(installTargets, iotools.ExactTarTarget{
 			TarName: "netcfg.json",
 			DstPath: "/etc/netmanager/netcfg.json",
 			DstPerm: 0o644,

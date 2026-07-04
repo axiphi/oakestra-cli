@@ -38,7 +38,7 @@ type FuncStep struct {
 }
 
 func (f FuncStep) Description() string {
-	return "Execute internal function: " + f.Name
+	return f.Name
 }
 
 func (f FuncStep) Run() error {
