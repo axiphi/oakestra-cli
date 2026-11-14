@@ -2,12 +2,50 @@ package install
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
+	"syscall"
 
 	"github.com/charmbracelet/huh"
 	"github.com/oakestra/oak-go-cli/internal/cliout"
+	"github.com/oakestra/oak-go-cli/internal/elevate"
+	"github.com/oakestra/oak-go-cli/internal/enact"
 )
 
 func DoInstallWorker(ctx context.Context, version string, autoConfirm bool) error {
+	if !elevate.HasRootPrivileges() {
+		elevationCmd, err := elevate.CurrentCommandWithRootElevation()
+		if err != nil {
+			return err
+		}
+
+		plan := &enact.Plan{
+			Info: "This command requires root privileges",
+			Goal: "re-execute it with root privileges",
+			Steps: []enact.Step{
+				enact.FuncStep{
+					Name: fmt.Sprintf("Execute %q",
+						strings.Join(elevationCmd.Args, " ")),
+					Fn: func() error {
+						return syscall.Exec(elevationCmd.Path, elevationCmd.Args, os.Environ())
+					},
+				},
+			},
+		}
+
+		reExecuted, err := plan.Execute(autoConfirm)
+		if err != nil {
+			return err
+		}
+		if !reExecuted {
+			return fmt.Errorf("root privileges required. Please run with sudo or as root")
+		}
+
+		// unreachable
+		return nil
+	}
+
 	if err := checkPrerequisites(); err != nil {
 		return err
 	}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+
+	"github.com/oakestra/oak-go-cli/internal/elevate"
 )
 
 func checkPrerequisites() error {
@@ -35,8 +37,8 @@ func checkIsSystemdBased() error {
 }
 
 func checkHasRootPrivileges() error {
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("root privileges required. Please run with sudo or as root")
+	if elevate.HasRootPrivileges() {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("root privileges required. Please run with sudo or as root")
 }
